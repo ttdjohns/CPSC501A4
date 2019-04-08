@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <iostream>
+#include <endian.h>
+
 
 using namespace std;
 
@@ -136,6 +138,14 @@ void convolve(float x[], int N, float h[], int M, float y[], int P)
 	}
 }
 
+inline void endian_swap(unsigned int& x)
+{
+	x = (x >> 24) |
+		((x << 8) & 0x00FF0000) |
+		((x >> 8) & 0x0000FF00) |
+		(x << 24);
+}
+
 int main(int argc, char ** argv)
 {
 	if (argc != 4) {
@@ -146,11 +156,14 @@ int main(int argc, char ** argv)
 
 	input_size = readFile(argv[1]);
 	//printf("input_size is %lu\n", size[0]);
-	//ir_size = readFile(argv[2]);
-
-	signals[1] = new float[1];
-	signals[1][0] = 1.0; 
-	size[1] = 1;//*/
+	bool useImpulse = true;
+	if (!useImpulse) {
+		ir_size = readFile(argv[2]);
+	} else {
+		signals[1] = new float[1];
+		signals[1][0] = 1.0;
+		size[1] = 1;//*/
+	}
 	//printf("ir_size is %lu\n", size[1]);
 	
 	//printf("input_size is %lu\n", input_size);
@@ -160,8 +173,27 @@ int main(int argc, char ** argv)
 	signals[2] = new float[size[2]];
 
 	convolve(signals[0], size[0], signals[1], size[1], signals[2], size[2]);
+	printf("finished the convolution\n");
+	short int *buffer = new short int[sizeof(struct header_file) / 2 + size[2]];
+	printf("initialized the ouput buffer\n");
 
+	//file = fopen(argv[1], "rb");
+	//fread(&buffer, sizeof(struct header_file), 1, file);
+	//fclose(file);
+	printf("changing the size of the header\n");
+	headers[0].subchunk2_size = htole32(size[2]);
+	memcpy(buffer, &headers[0], sizeof(struct header_file));
 
+	printf("converting the signal back into short ints\n");
+	for (unsigned long i = 0; i < size[2]; i++) {
+		buffer[sizeof(struct header_file) + i] = (short int)(signals[2][i] * 32768);
+	}
+	//memcpy(buffer + 40, &size[2], 4);
+	
+	FILE *file;
+	file = fopen(argv[3], "w");
+	fwrite(&buffer, sizeof(struct header_file) + size[2], 1, file);
+	fclose(file);
 
 	printf("finished\n");
 	return 0;
