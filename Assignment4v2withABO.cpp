@@ -39,6 +39,7 @@ unsigned long ir_size = 0;
 struct header_file headers[3];
 unsigned long size[3];
 float ** signals;
+float ** fftSignals;
 int nextInd = 0;
 
 int readFile(char *name)
@@ -92,51 +93,6 @@ int readFile(char *name)
 	return count;
 }
 
-/*****************************************************************************
-*
-*    Function:     convolve
-*
-*    Description:  Convolves two signals, producing an output signal.
-*                  The convolution is done in the time domain using the
-*                  "Input Side Algorithm" (see Smith, p. 112-115).
-*
-*    Parameters:   x[] is the signal to be convolved
-*                  N is the number of samples in the vector x[]
-*                  h[] is the impulse response, which is convolved with x[]
-*                  M is the number of samples in the vector h[]
-*                  y[] is the output signal, the result of the convolution
-*                  P is the number of samples in the vector y[].  P must
-*                       equal N + M - 1
-*
-*****************************************************************************/
-
-void convolve(float x[], int N, float h[], int M, float y[], int P)
-{
-	int n, m;
-
-	/*  Make sure the output buffer is the right size: P = N + M - 1  */
-	if (P != (N + M - 1)) {
-		printf("Output signal vector is the wrong size\n");
-		printf("It is %-d, but should be %-d\n", P, (N + M - 1));
-		printf("Aborting convolution\n");
-		return;
-	}
-
-	/*  Clear the output buffer y[] to all zero values  */
-	for (n = 0; n < P; n++)
-		y[n] = 0.0;
-
-	int counter = 0;
-	/*  Do the convolution  */
-	/*  Outer loop:  process each input value x[n] in turn  */
-	for (n = 0; n < N; n++) {
-		if ((counter = (counter + 1) % 1000) == 0)
-			printf("working on loop n = %d out of %d\n", n, N);
-		/*  Inner loop:  process x[n] with each sample of h[]  */
-		for (m = 0; m < M; m++)
-			y[n + m] += x[n] * h[m];
-	}
-}
 
 inline void endian_swap(unsigned int& x)
 {
@@ -144,6 +100,92 @@ inline void endian_swap(unsigned int& x)
 		((x << 8) & 0x00FF0000) |
 		((x >> 8) & 0x0000FF00) |
 		(x << 24);
+}
+
+void swap(double a, double b) {
+	double temp = a;
+	a = b;
+	b = a;
+}
+
+void fft(double* data, unsigned long nn)
+{
+	unsigned long n, mmax, m, j, istep, i;
+	double wtemp, wr, wpr, wpi, wi, theta;
+	double tempr, tempi;
+
+	// reverse-binary reindexing
+	n = nn << 1;
+	j = 1;
+	for (i = 1; i < n; i += 2) {
+		if (j > i) {
+			swap(data[j - 1], data[i - 1]);
+			swap(data[j], data[i]);
+		}
+		m = nn;
+		while (m >= 2 && j > m) {
+			j -= m;
+			m >>= 1;
+		}
+		j += m;
+	};
+
+	// here begins the Danielson-Lanczos section
+	mmax = 2;
+	while (n > mmax) {
+		istep = mmax << 1;
+		theta = -(2 * M_PI / mmax);
+		wtemp = sin(0.5*theta);
+		wpr = -2.0*wtemp*wtemp;
+		wpi = sin(theta);
+		wr = 1.0;
+		wi = 0.0;
+		for (m = 1; m < mmax; m += 2) {
+			for (i = m; i <= n; i += istep) {
+				j = i + mmax;
+				tempr = wr * data[j - 1] - wi * data[j];
+				tempi = wr * data[j] + wi * data[j - 1];
+
+				data[j - 1] = data[i - 1] - tempr;
+				data[j] = data[i] - tempi;
+				data[i - 1] += tempr;
+				data[i] += tempi;
+			}
+			wtemp = wr;
+			wr += wr * wpr - wi * wpi;
+			wi += wi * wpr + wtemp * wpi;
+		}
+		mmax = istep;
+	}
+}
+
+void
+ifft(double **v, unsigned long n, double **tmp)
+{
+	if (n > 1) {			/* otherwise, do nothing and return */
+		unsigned long k, m;
+		double *z, *w, **vo, **ve;
+		z = new double[2];
+		w = new double[2];
+		ve = tmp; vo = tmp + n / 2;
+		for (k = 0; k < n / 2; k++) {
+			ve[k] = v[2 * k];
+			vo[k] = v[2 * k + 1];
+		}
+		ifft(ve, n << 1, v);		/* FFT on even-indexed elements of v[] */
+		ifft(vo, n << 1, v);		/* FFT on odd-indexed elements of v[] */
+		for (m = 0; m < n / 2; m++) {
+			w[0] = cos(2 * PI*m / (double)n);
+			w[1] = sin(2 * PI*m / (double)n);
+			z[0] = w[0]*vo[m][0] - w[1]*vo[m][1];	/* Re(w*vo[m]) */
+			z[1] = w[0]*vo[m][1] + w[1]*vo[m][0];	/* Im(w*vo[m]) */
+			v[m][0] = ve[m][0] + z[0];
+			v[m][1] = ve[m][1] + z[1];
+			v[m + n / 2][0] = ve[m][0] - z[0];
+			v[m + n / 2][1] = ve[m][1] - z[1];
+		}
+	}
+	return;
 }
 
 int main(int argc, char ** argv)
@@ -164,35 +206,77 @@ int main(int argc, char ** argv)
 		signals[1][0] = 1.0;
 		size[1] = 1;//*/
 	}
-	//printf("ir_size is %lu\n", size[1]);
-	
-	//printf("input_size is %lu\n", input_size);
-	//printf("input_signal[200] is %f\n", signals[0][200]);
-	//printf("ir_signal[200] is %f\n", signals[1][200]);
-	size[2] = size[0] + size[1] - 1;
-	signals[2] = new float[size[2]];
 
-	convolve(signals[0], size[0], signals[1], size[1], signals[2], size[2]);
+	/*size[2] = size[0] + size[1] - 1;
+	signals[2] = new float[size[2]];*/
+
+	unsigned long nn = 1;
+	while (nn < 2 * size[0]) {
+		nn >> 1;
+	}
+
+
+	fftSignals = new float*[2];
+	//convolve(signals[0], size[0], signals[1], size[1], signals[2], size[2]);
+	for (int i = 0; i < 2; i++) {
+		fftSignals[i] = new float[nn];
+	}
+
+	// put the real part in every second index
+	for (int i = 0; i < nn; i++) {
+		for (int k = 0; k < 2; k++) {					// optimize this part
+			if ((i % 2) == 0) {							// optimize this part too 
+				fftSignals[k][i] = signals[k][i << 1];
+			}
+			else {
+				fftSignals[k][i] = 0;
+			}
+		}
+	}
+
+	nn = nn << 1;
+	fft(fftSignals[0], nn);
+	fft(fftSignals[1], nn);
+
+	nn = nn >> 1;
+	for (unsigned long i = 0; i < nn; i++) {
+		fftSignals[0][i] += fftSignals[1][i];
+	}
+
+	nn = nn << 1;
+	double ** v = new double[nn];
+	double ** tmp = new double[nn];
+	for (int i = 0; i < nn; i++) {
+		v[i] = new double[2];
+		tmp[i] = new double[2];
+		tmp[i][0] = 0;
+		tmp[i][1] = 0;
+		v[i][0] = fftSignals[0][(2 * i)];
+		v[i][1] = fftSignals[0][(2 * i) + 1];
+	}
+
+	ifft(v, nn, tmp);
+
 	printf("finished the convolution\n");
-	short int *buffer = new short int[sizeof(struct header_file) / 2 + size[2]];
+	short int *buffer = new short int[sizeof(struct header_file) / 2 + size[0]];
 	printf("initialized the ouput buffer\n");
 
 	//file = fopen(argv[1], "rb");
 	//fread(&buffer, sizeof(struct header_file), 1, file);
 	//fclose(file);
 	printf("changing the size of the header\n");
-	headers[0].subchunk2_size = htole32(size[2]);
+	headers[0].subchunk2_size = htole32(size[0]);
 	memcpy(buffer, &headers[0], sizeof(struct header_file));
 
 	printf("converting the signal back into short ints\n");
-	for (unsigned long i = 0; i < size[2]; i++) {
-		buffer[sizeof(struct header_file) + i] = (short int)(signals[2][i] * 32768);
+	for (unsigned long i = 0; i < size[0]; i++) {
+		buffer[sizeof(struct header_file) + i] = (short int)(v[i][0] * 32768);
 	}
 	//memcpy(buffer + 40, &size[2], 4);
 	
 	FILE *file;
 	file = fopen(argv[3], "w");
-	fwrite(&buffer, sizeof(struct header_file) + size[2], 1, file);
+	fwrite(&buffer, sizeof(struct header_file) + size[0], 1, file);
 	fclose(file);
 
 	printf("finished\n");
