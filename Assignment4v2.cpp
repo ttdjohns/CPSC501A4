@@ -37,7 +37,7 @@ using namespace std;
 #define STEREOPHONIC      2
 
 //function prototypes
-void convolve(float* x, int N, float* h, int M, float y[], int P);
+void convolve(float* x, unsigned long int N, float* h, unsigned long int M, float y[], unsigned long int P);
 //void print_vector(char *title, float x[], int N);
 void writeWaveFileHeader(int channels, int numberSamples,
 	double outputRate, FILE *outputFile);
@@ -111,14 +111,14 @@ float * readFile(char *inputFile, header_file &headF) {
 
 			float * signal = new float[headF.subchunk2_size / 2];
 
-			//cout << "data size :" << (headF.subchunk2_size) << endl;
+			cout << "data size :" << (headF.subchunk2_size) << endl;
 
 			int nextFloat = 0;
 			for (int i = 40 + headF.subchunk1_size - 16 + 4; i < headF.subchunk2_size; i += 2) {
 				signal[nextFloat] = (((input[i]) | 0xff00) & ((input[i + 1] << 8) | 0x00ff)) / 32768.0;
 				nextFloat++;
 			}
-			return &signal[0];
+			return &signal[1];
 		}
 		else {
 			cout << "failed to open file \n exiting..." << endl;
@@ -189,15 +189,15 @@ int main(int argc, char ** argv)
 	
 	//creating output array
 	cout << "Initilizing output arrays" << endl;
-	unsigned long int outSize = inputHead.subchunk2_size + irHead.subchunk2_size - 1;
+	unsigned long int outSize = (inputHead.subchunk2_size / 2) + (irHead.subchunk2_size / 2) - 1;
 	signals[2] = new float[outSize + 1];
 	cout << "finished initilizing output arrays" << endl;
 
-	cout << "begining convolution" << endl;
+	printf("begining convolution with inputHead.subchunk2_size = %lu, irHead.subchunk2_size = %lu, outSize = %lu\n", inputHead.subchunk2_size, irHead.subchunk2_size, outSize);
 	clock_t currentTime;
 	currentTime = clock();
-
-	convolve(signals[0], inputHead.subchunk2_size, signals[1], irHead.subchunk2_size, signals[2], outSize);
+	
+	convolve(signals[0], (inputHead.subchunk2_size / 2), signals[1], (irHead.subchunk2_size / 2), signals[2], outSize);
 
 	currentTime = clock() - currentTime;
 	printf("Clock cycles taken for convolution: %d\n", currentTime);
@@ -253,9 +253,9 @@ int main(int argc, char ** argv)
 *
 *****************************************************************************/
 
-void convolve(float x[], int N, float h[], int M, float y[], int P)
+void convolve(float x[], unsigned long int N, float h[], unsigned long int M, float y[], unsigned long int P)
 {
-	int n, m;
+	unsigned long int n, m;
 
 	/*  Make sure the output buffer is the right size: P = N + M - 1  */
 	if (P != (N + M - 1)) {
@@ -264,16 +264,20 @@ void convolve(float x[], int N, float h[], int M, float y[], int P)
 		printf("Aborting convolution\n");
 		return;
 	}
-	cout << "clearing output buffer" << endl;
+	//cout << "clearing output buffer" << endl;
 	/*  Clear the output buffer y[] to all zero values  */
 	for (n = 0; n < P; n++)
 		y[n] = 0.0;
 
-	cout << "doing convolution" << endl;
+	//cout << "doing convolution" << endl;
 	/*  Do the convolution  */
 	/*  Outer loop:  process each input value x[n] in turn  */
 	int num = 0;
 	for (n = 0; n < N; n++) {
+		/*if (num == 0) {
+			printf("working through n = %lu \n", n);
+		}
+		num = (num + 1) % 100000;//*/
 		/*  Inner loop:  process x[n] with each sample of h[]  */
 		for (m = 0; m < M; m++)
 			y[n + m] += x[n] * h[m];
