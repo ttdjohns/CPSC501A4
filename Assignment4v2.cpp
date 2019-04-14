@@ -3,6 +3,7 @@
 #include <string.h>
 #include <iostream>
 #include <endian.h>
+#include <math.h>
 
 
 using namespace std;
@@ -61,29 +62,24 @@ int readFile(char *name)
 
 	//	Get file length
 	fseek(file, 0, SEEK_END);
-	fileLen = ftell(file);
+	fileLen = ftell(file) - sizeof(struct header_file);
 	printf("Total bytes for samples: %d\n", fileLen - sizeof(struct header_file));
-	int count = (fileLen - sizeof(struct header_file)) / 2;
+	int count = fileLen / 2;
 	printf("Number of samples (16bits or 2bytes per sample): %d\n", count);
 
 	fseek(file, sizeof(struct header_file), SEEK_SET);
 
-	short int *value = new short int[count];
-	//memset(value, 0, sizeof(short int) * samples_count);
-	printf("value initialized\n");
-
+	char *value = new char[fileLen];
+	fread(&value, fileLen, 1, file);
 	signals[nextInd] = new float[count];
+	int nextShort = 0;
+	for (int i = 0; i < fileLen; i += 2) {
+		signals[nextInd][nextFloat++] = ((value[i] | 0xff00) & ((value[i + 1] << 8) | 0x00f)) / 32768.0;
+	}
+
 	//memset(value, 0, sizeof(float) * samples_count);
 
 	printf("signal initialized\n");
-
-	//Reading data
-	for (int i = 0; i < count; i++)
-	{
-		fread(&value[i], 2, 1, file);
-		signals[nextInd][i] = value[i] / 32768.0;
-	}
-	printf("signals[200] = %f\n", signals[nextInd][200]);
 
 	size[nextInd] = count;
 
@@ -91,6 +87,76 @@ int readFile(char *name)
 
 	return count;
 }
+
+//function prototypes
+void convolve(float* x, int N, float* h, int M, float y[], int P);
+//void print_vector(char *title, float x[], int N);
+void createTestTone(double frequency, double duration,
+	int numberOfChannels, char *filename);
+void writeWaveFileHeader(int channels, int numberSamples,
+	double outputRate, FILE *outputFile);
+size_t fwriteIntLSB(int data, FILE *stream);
+size_t fwriteShortLSB(short int data, FILE *stream);
+
+int main(int argc, char ** argv)
+{
+	if (argc != 4) {
+		printf("Usage: ./Assignment4 [input file] [IR file] [output file]\n");
+		return 0;
+	}
+	signals = new float*[3];
+
+	input_size = readFile(argv[1]);
+	//printf("input_size is %lu\n", size[0]);
+	bool useImpulse = false;
+	if (!useImpulse) {
+		ir_size = readFile(argv[2]);
+	} else {
+		signals[1] = new float[1];
+		signals[1][0] = 1.0;
+		size[1] = 1;//*/
+	}
+	//printf("ir_size is %lu\n", size[1]);
+	
+	//printf("input_size is %lu\n", input_size);
+	//printf("input_signal[200] is %f\n", signals[0][200]);
+	//printf("ir_signal[200] is %f\n", signals[1][200]);
+	
+	//creating output array
+	size[2] = size[0] + size[1] - 1;
+	signals[2] = new float[size[2]];
+
+	convolve(signals[0], size[0], signals[1], size[1], signals[2], size[2]);
+	printf("finished the convolution\n");
+	short int *buffer = new short int[sizeof(struct header_file) / 2 + size[2]];
+	printf("initialized the ouput buffer\n");
+
+	//file = fopen(argv[1], "rb");
+	//fread(&buffer, sizeof(struct header_file), 1, file);
+	//fclose(file);
+	printf("changing the size of the header\n");
+	headers[0].subchunk2_size = htole32(size[2]);
+	memcpy(buffer, &headers[0], sizeof(struct header_file));
+
+	printf("converting the signal back into short ints\n");
+	for (unsigned long i = 0; i < size[2]; i++) {
+		buffer[sizeof(struct header_file) + i] = (short int)(signals[2][i] * 32768);
+	}
+	//memcpy(buffer + 40, &size[2], 4);
+	
+	FILE *file;
+	file = fopen(argv[3], "w");
+	fwrite(&buffer, sizeof(struct header_file) + size[2], 1, file);
+	fclose(file);
+
+	printf("finished\n");
+	return 0;
+}
+
+
+
+// The following was written by  Dr. Lenord Manzara
+
 
 /*****************************************************************************
 *
@@ -126,75 +192,239 @@ void convolve(float x[], int N, float h[], int M, float y[], int P)
 	for (n = 0; n < P; n++)
 		y[n] = 0.0;
 
-	int counter = 0;
 	/*  Do the convolution  */
 	/*  Outer loop:  process each input value x[n] in turn  */
 	for (n = 0; n < N; n++) {
-		if ((counter = (counter + 1) % 1000) == 0)
-			printf("working on loop n = %d out of %d\n", n, N);
 		/*  Inner loop:  process x[n] with each sample of h[]  */
 		for (m = 0; m < M; m++)
 			y[n + m] += x[n] * h[m];
 	}
 }
 
-inline void endian_swap(unsigned int& x)
+
+
+/*****************************************************************************
+*
+*    Function:     print_vector
+*
+*    Description:  Prints the vector out to the screen
+*
+*    Parameters:   title is a string naming the vector
+*                  x[] is the vector to be printed out
+*                  N is the number of samples in the vector x[]
+*
+*****************************************************************************/
+
+void print_vector(char *title, float x[], int N)
 {
-	x = (x >> 24) |
-		((x << 8) & 0x00FF0000) |
-		((x >> 8) & 0x0000FF00) |
-		(x << 24);
+	int i;
+
+	printf("\n%s\n", title);
+	printf("Vector size:  %-d\n", N);
+	printf("Sample Number \tSample Value\n");
+	for (i = 0; i < N; i++)
+		printf("%-d\t\t%f\n", i, x[i]);
+}
+/******************************************************************************
+*
+*       function:       createTestTone
+*
+*       purpose:        Calculates and writes out a sine test tone to file
+*
+*       arguments:      frequency:  frequency of the test tone in Hz
+*                       duration:  length of the test tone in seconds
+*                       numberOfChannels:  number of audio channels
+*                       filename:  name of the file to create
+*
+*       internal
+*       functions:      writeWaveFileHeader, fwriteShortLSB
+*
+*       library
+*       functions:      ceil, pow, fopen, fprintf, sin, rint, fclose
+*
+******************************************************************************/
+
+void createTestTone(double frequency, double duration,
+	int numberOfChannels, char *filename)
+{
+	int i;
+
+	/*  Calculate the number of sound samples to create,
+		rounding upwards if necessary  */
+	int numberOfSamples = (int)ceil(duration * SAMPLE_RATE);
+
+	/*  Calculate the maximum value of a sample  */
+	int maximumValue = (int)pow(2.0, (double)BITS_PER_SAMPLE - 1) - 1;
+
+	/*  Open a binary output file stream for writing */
+	FILE *outputFileStream = fopen(filename, "wb");
+	if (outputFileStream == NULL) {
+		fprintf(stderr, "File %s cannot be opened for writing\n", filename);
+		return;
+	}
+
+	/*  Write the WAVE file header  */
+	writeWaveFileHeader(numberOfChannels, numberOfSamples,
+		SAMPLE_RATE, outputFileStream);
+
+	/*  Create the sine tone and write it to file  */
+	/*  Since the frequency is fixed, the angular frequency
+		and increment can be precalculated  */
+	double angularFrequency = 2.0 * PI * frequency;
+	double increment = angularFrequency / SAMPLE_RATE;
+	for (i = 0; i < numberOfSamples; i++) {
+		/*  Calculate the sine wave in the range -1.0 to + 1.0  */
+		double value = sin(i * increment);
+
+		/*  Convert the value to a 16-bit integer, with the
+			range -maximumValue to + maximumValue.  The calculated
+			value is rounded to the nearest integer  */
+		short int sampleValue = rint(value * maximumValue);
+
+		/*  Write out the sample as a 16-bit (short) integer
+			in little-endian format  */
+		fwriteShortLSB(sampleValue, outputFileStream);
+
+		/*  If stereo output, duplicate the sample in the right channel  */
+		if (numberOfChannels == STEREOPHONIC)
+			fwriteShortLSB(sampleValue, outputFileStream);
+	}
+
+	/*  Close the output file stream  */
+	fclose(outputFileStream);
 }
 
-int main(int argc, char ** argv)
+
+
+/******************************************************************************
+*
+*       function:       writeWaveFileHeader
+*
+*       purpose:        Writes the header in WAVE format to the output file.
+*
+*       arguments:      channels:  the number of sound output channels
+*                       numberSamples:  the number of sound samples
+*                       outputRate:  the sample rate
+*                       outputFile:  the output file stream to write to
+*
+*       internal
+*       functions:      fwriteIntLSB, fwriteShortLSB
+*
+*       library
+*       functions:      ceil, fputs
+*
+******************************************************************************/
+
+void writeWaveFileHeader(int channels, int numberSamples,
+	double outputRate, FILE *outputFile)
 {
-	if (argc != 4) {
-		printf("Usage: ./Assignment4 [input file] [IR file] [output file]\n");
-		return 0;
-	}
-	signals = new float*[3];
+	/*  Calculate the total number of bytes for the data chunk  */
+	int dataChunkSize = channels * numberSamples * BYTES_PER_SAMPLE;
 
-	input_size = readFile(argv[1]);
-	//printf("input_size is %lu\n", size[0]);
-	bool useImpulse = true;
-	if (!useImpulse) {
-		ir_size = readFile(argv[2]);
-	} else {
-		signals[1] = new float[1];
-		signals[1][0] = 1.0;
-		size[1] = 1;//*/
-	}
-	//printf("ir_size is %lu\n", size[1]);
-	
-	//printf("input_size is %lu\n", input_size);
-	//printf("input_signal[200] is %f\n", signals[0][200]);
-	//printf("ir_signal[200] is %f\n", signals[1][200]);
-	size[2] = size[0] + size[1] - 1;
-	signals[2] = new float[size[2]];
+	/*  Calculate the total number of bytes for the form size  */
+	int formSize = 36 + dataChunkSize;
 
-	convolve(signals[0], size[0], signals[1], size[1], signals[2], size[2]);
-	printf("finished the convolution\n");
-	short int *buffer = new short int[sizeof(struct header_file) / 2 + size[2]];
-	printf("initialized the ouput buffer\n");
+	/*  Calculate the total number of bytes per frame  */
+	short int frameSize = channels * BYTES_PER_SAMPLE;
 
-	//file = fopen(argv[1], "rb");
-	//fread(&buffer, sizeof(struct header_file), 1, file);
-	//fclose(file);
-	printf("changing the size of the header\n");
-	headers[0].subchunk2_size = htole32(size[2]);
-	memcpy(buffer, &headers[0], sizeof(struct header_file));
+	/*  Calculate the byte rate  */
+	int bytesPerSecond = (int)ceil(outputRate * frameSize);
 
-	printf("converting the signal back into short ints\n");
-	for (unsigned long i = 0; i < size[2]; i++) {
-		buffer[sizeof(struct header_file) + i] = (short int)(signals[2][i] * 32768);
-	}
-	//memcpy(buffer + 40, &size[2], 4);
-	
-	FILE *file;
-	file = fopen(argv[3], "w");
-	fwrite(&buffer, sizeof(struct header_file) + size[2], 1, file);
-	fclose(file);
+	/*  Write header to file  */
+	/*  Form container identifier  */
+	fputs("RIFF", outputFile);
 
-	printf("finished\n");
-	return 0;
+	/*  Form size  */
+	fwriteIntLSB(formSize, outputFile);
+
+	/*  Form container type  */
+	fputs("WAVE", outputFile);
+
+	/*  Format chunk identifier (Note: space after 't' needed)  */
+	fputs("fmt ", outputFile);
+
+	/*  Format chunk size (fixed at 16 bytes)  */
+	fwriteIntLSB(16, outputFile);
+
+	/*  Compression code:  1 = PCM  */
+	fwriteShortLSB(1, outputFile);
+
+	/*  Number of channels  */
+	fwriteShortLSB((short)channels, outputFile);
+
+	/*  Output Sample Rate  */
+	fwriteIntLSB((int)outputRate, outputFile);
+
+	/*  Bytes per second  */
+	fwriteIntLSB(bytesPerSecond, outputFile);
+
+	/*  Block alignment (frame size)  */
+	fwriteShortLSB(frameSize, outputFile);
+
+	/*  Bits per sample  */
+	fwriteShortLSB(BITS_PER_SAMPLE, outputFile);
+
+	/*  Sound Data chunk identifier  */
+	fputs("data", outputFile);
+
+	/*  Chunk size  */
+	fwriteIntLSB(dataChunkSize, outputFile);
+}
+
+
+
+/******************************************************************************
+*
+*       function:       fwriteIntLSB
+*
+*       purpose:        Writes a 4-byte integer to the file stream, starting
+*                       with the least significant byte (i.e. writes the int
+*                       in little-endian form).  This routine will work on both
+*                       big-endian and little-endian architectures.
+*
+*       internal
+*       functions:      none
+*
+*       library
+*       functions:      fwrite
+*
+******************************************************************************/
+
+size_t fwriteIntLSB(int data, FILE *stream)
+{
+	unsigned char array[4];
+
+	array[3] = (unsigned char)((data >> 24) & 0xFF);
+	array[2] = (unsigned char)((data >> 16) & 0xFF);
+	array[1] = (unsigned char)((data >> 8) & 0xFF);
+	array[0] = (unsigned char)(data & 0xFF);
+	return fwrite(array, sizeof(unsigned char), 4, stream);
+}
+
+
+
+/******************************************************************************
+*
+*       function:       fwriteShortLSB
+*
+*       purpose:        Writes a 2-byte integer to the file stream, starting
+*                       with the least significant byte (i.e. writes the int
+*                       in little-endian form).  This routine will work on both
+*                       big-endian and little-endian architectures.
+*
+*       internal
+*       functions:      none
+*
+*       library
+*       functions:      fwrite
+*
+******************************************************************************/
+
+size_t fwriteShortLSB(short int data, FILE *stream)
+{
+	unsigned char array[2];
+
+	array[1] = (unsigned char)((data >> 8) & 0xFF);
+	array[0] = (unsigned char)(data & 0xFF);
+	return fwrite(array, sizeof(unsigned char), 2, stream);
 }
