@@ -4,99 +4,158 @@
 #include <iostream>
 #include <endian.h>
 #include <math.h>
+#include <fstream>
+#include <iostream>
+#include <vector>
+#include <cmath>
+#include <time.h> 
 
 
 using namespace std;
 
 
+/*  CONSTANTS  ***************************************************************/
+#define PI                3.14159265358979
+
+/*  Test tone frequency in Hz  */
+#define FREQUENCY         440.0
+
+/*  Test tone duration in seconds  */
+#define DURATION          2.0				
+
+/*  Standard sample rate in Hz  */
+#define SAMPLE_RATE       44100.0
+
+/*  Standard sample size in bits  */
+#define BITS_PER_SAMPLE   16
+
+/*  Standard sample size in bytes  */
+#define BYTES_PER_SAMPLE  (BITS_PER_SAMPLE/8)
+
+/*  Number of channels  */
+#define MONOPHONIC        1
+#define STEREOPHONIC      2
+
+//function prototypes
+void convolve(float* x, int N, float* h, int M, float y[], int P);
+//void print_vector(char *title, float x[], int N);
+void writeWaveFileHeader(int channels, int numberSamples,
+	double outputRate, FILE *outputFile);
+size_t fwriteIntLSB(int data, FILE *stream);
+size_t fwriteShortLSB(short int data, FILE *stream);
+
 struct header_file
 {
-	char chunk_id[4];
-	int chunk_size;
-	char format[4];
-	char subchunk1_id[4];
-	int subchunk1_size;
-	short int audio_format;
-	short int num_channels;
-	int sample_rate;			// sample_rate denotes the sampling rate.
-	int byte_rate;
-	short int block_align;
-	short int bits_per_sample;
-	char subchunk2_id[4];
-	long int subchunk2_size;			// subchunk2_size denotes the number of samples.
-};
-
-//Chunks
-struct chunk_t
-{
-	char ID[4]; //"data" = 0x61746164
-	unsigned long size;  //Chunk data bytes
-};
+	char chunk_id;
+	unsigned int chunk_size;
+	char * format;
+	char * subchunk1_id;
+	unsigned int subchunk1_size;
+	unsigned short int audio_format;
+	unsigned short int num_channels;
+	unsigned int sample_rate;			// sample_rate denotes the sampling rate.
+	unsigned int byte_rate;
+	unsigned short int block_align;
+	unsigned short int bits_per_sample;
+	char * subchunk2_id;
+	unsigned long int subchunk2_size;			// subchunk2_size denotes the number of samples.
+} inputHead, irHead;
 
 float *input_signal;
 unsigned long input_size = 0;
 float *ir_signal;
 unsigned long ir_size = 0;
 struct header_file headers[3];
-unsigned long size[3];
+unsigned long* size;
 float ** signals;
 int nextInd = 0;
 
-int readFile(char *name)
-{
-	FILE *file;
-	short int *buffer;
-	unsigned long fileLen;
-	//	Open file
-	file = fopen(name, "rb");
-	if (!file)
-	{
-		fprintf(stderr, "Unable to open file %s", name);
-		exit(-1);
-	}
-	//	Read header
-	fread(&headers[nextInd], sizeof(struct header_file), 1, file);
-	printf(" Size of Header file : %d  bytes\n", sizeof(struct header_file));
-	printf(" Sampling rate of the input wave file : %d Hz \n", headers[nextInd].sample_rate);
-	printf(" Bits per sample in wave file : %d \n", headers[nextInd].bits_per_sample);
+float * readFile(char *inputFile, header_file &headF) {
+		cout << "Entered readFile" << endl;
+		ifstream file(inputFile, ios::in | ios::binary | ios::ate);
 
-	//	Get file length
-	fseek(file, 0, SEEK_END);
-	fileLen = ftell(file) - sizeof(struct header_file);
-	printf("Total bytes for samples: %d\n", fileLen - sizeof(struct header_file));
-	int count = fileLen / 2;
-	printf("Number of samples (16bits or 2bytes per sample): %d\n", count);
+		if (file.is_open()) {
+			streampos fileSize = file.tellg();
+			file.seekg(0, ios::beg);
+			char * input;
+			input = new char[fileSize];
+			file.read(input, fileSize);
+			file.close();
 
-	fseek(file, sizeof(struct header_file), SEEK_SET);
+			//Copying from input to provided header file 
+			//cout << "memcpy1" << endl;
+			memcpy(&headF.chunk_id, &input[0], 4);
+			//cout << "memcpy2" << endl;
+			memcpy(&headF.chunk_size, &input[4], 4);
+			//cout << "memcpy3" << endl;
+			memcpy(&headF.format, &input[8], 4);
+			//cout << "memcpy4" << endl;
+			memcpy(&headF.subchunk1_id, &input[12], 4);
+			//cout << "memcpy5" << endl;
+			memcpy(&headF.subchunk1_size, &input[16], 4);
+			//cout << "memcpy6" << endl;
+			memcpy(&headF.audio_format, &input[18], 2); 
+			//cout << "memcpy7" << endl;
+			memcpy(&headF.num_channels, &input[20], 2);
+			//cout << "memcpy8" << endl;
+			memcpy(&headF.sample_rate, &input[22], 4);
 
-	char *value = new char[fileLen];
-	fread(&value, fileLen, 1, file);
-	signals[nextInd] = new float[count];
-	int nextShort = 0;
-	for (int i = 0; i < fileLen; i += 2) {
-		signals[nextInd][nextFloat++] = ((value[i] | 0xff00) & ((value[i + 1] << 8) | 0x00f)) / 32768.0;
-	}
+			//cout << "memcpy9" << endl;
 
-	//memset(value, 0, sizeof(float) * samples_count);
+			memcpy(&headF.subchunk2_size, &input[40 + headF.subchunk1_size - 16], 4);
+			/*headF.subchunk2_size = (headF.subchunk2_size >> 24) |
+									((headF.subchunk2_size << 8) & 0x00FF0000) |
+									((headF.subchunk2_size >> 8) & 0x0000FF00) |
+									(headF.subchunk2_size << 24);//*/
 
-	printf("signal initialized\n");
 
-	size[nextInd] = count;
+			float * signal = new float[headF.subchunk2_size / 2];
 
-	nextInd++;
+			//cout << "data size :" << (headF.subchunk2_size) << endl;
 
-	return count;
+			int nextFloat = 0;
+			for (int i = 40 + headF.subchunk1_size - 16 + 4; i < headF.subchunk2_size; i += 2) {
+				signal[nextFloat] = (((input[i]) | 0xff00) & ((input[i + 1] << 8) | 0x00ff)) / 32768.0;
+				nextFloat++;
+			}
+			return &signal[0];
+		}
+		else {
+			cout << "failed to open file \n exiting..." << endl;
+			exit(-1);
+			return NULL;
+		}
 }
 
-//function prototypes
-void convolve(float* x, int N, float* h, int M, float y[], int P);
-//void print_vector(char *title, float x[], int N);
-void createTestTone(double frequency, double duration,
-	int numberOfChannels, char *filename);
-void writeWaveFileHeader(int channels, int numberSamples,
-	double outputRate, FILE *outputFile);
-size_t fwriteIntLSB(int data, FILE *stream);
-size_t fwriteShortLSB(short int data, FILE *stream);
+void outputToIntArray(int *ret, unsigned long int s) {
+	for (int i = 0; i < s; i++) {
+		ret[i] = (int)(signals[2][i] * 32768);
+	}
+}
+
+void writeOutputToFile(int numberOfSamples, int out[], char *filename)
+{
+	int i;
+
+	/*  Open a binary output file stream for writing */
+	FILE *outputFileStream = fopen(filename, "wb");
+	if (outputFileStream == NULL) {
+		fprintf(stderr, "File %s cannot be opened for writing\n", filename);
+		return;
+	}
+
+	/*  Write the WAVE file header  */
+	writeWaveFileHeader(MONOPHONIC, numberOfSamples,
+		SAMPLE_RATE, outputFileStream);
+
+	for (i = 0; i < numberOfSamples; i++) {
+		
+		fwriteShortLSB(out[i], outputFileStream);
+	}
+
+	/*  Close the output file stream  */
+	fclose(outputFileStream);
+}
 
 int main(int argc, char ** argv)
 {
@@ -104,29 +163,47 @@ int main(int argc, char ** argv)
 		printf("Usage: ./Assignment4 [input file] [IR file] [output file]\n");
 		return 0;
 	}
+	cout << "Begin" << endl;
 	signals = new float*[3];
-
-	input_size = readFile(argv[1]);
+	//size = new unsigned long[3];
+	printf("attempting to read %s\n", argv[1]);
+	signals[0] = readFile(argv[1], inputHead);
+	//printf("returned from first readFile\n");
+	//fflush(stdout);
 	//printf("input_size is %lu\n", size[0]);
-	bool useImpulse = false;
-	if (!useImpulse) {
-		ir_size = readFile(argv[2]);
-	} else {
+	//bool useImpulse = false;
+	//if (!useImpulse) {
+	printf("attempting to read %s\n", argv[2]);
+	//fflush(stdout);
+	signals[1] = readFile(argv[2], irHead);
+	/*} else {
 		signals[1] = new float[1];
 		signals[1][0] = 1.0;
-		size[1] = 1;//*/
-	}
-	//printf("ir_size is %lu\n", size[1]);
+		size[1] = 1;//
+	}*/
+	//printf("ir_size is %lu\n", ir_size);
 	
 	//printf("input_size is %lu\n", input_size);
 	//printf("input_signal[200] is %f\n", signals[0][200]);
 	//printf("ir_signal[200] is %f\n", signals[1][200]);
 	
 	//creating output array
-	size[2] = size[0] + size[1] - 1;
-	signals[2] = new float[size[2]];
+	cout << "Initilizing output arrays" << endl;
+	unsigned long int outSize = inputHead.subchunk2_size + irHead.subchunk2_size - 1;
+	signals[2] = new float[outSize + 1];
+	cout << "finished initilizing output arrays" << endl;
 
-	convolve(signals[0], size[0], signals[1], size[1], signals[2], size[2]);
+	cout << "begining convolution" << endl;
+	clock_t currentTime;
+	currentTime = clock();
+
+	convolve(signals[0], inputHead.subchunk2_size, signals[1], irHead.subchunk2_size, signals[2], outSize);
+
+	currentTime = clock() - currentTime;
+	printf("Clock cycles taken for convolution: %d\n", currentTime);
+	printf("Seconds taken for convolution: %f\n", ((float)currentTime) / CLOCKS_PER_SEC);
+
+	/*
 	printf("finished the convolution\n");
 	short int *buffer = new short int[sizeof(struct header_file) / 2 + size[2]];
 	printf("initialized the ouput buffer\n");
@@ -143,11 +220,11 @@ int main(int argc, char ** argv)
 		buffer[sizeof(struct header_file) + i] = (short int)(signals[2][i] * 32768);
 	}
 	//memcpy(buffer + 40, &size[2], 4);
-	
-	FILE *file;
-	file = fopen(argv[3], "w");
-	fwrite(&buffer, sizeof(struct header_file) + size[2], 1, file);
-	fclose(file);
+	*/
+	int *buffer = new int[outSize];
+	outputToIntArray(buffer, outSize);
+
+	writeOutputToFile((int) outSize, buffer, argv[3]);
 
 	printf("finished\n");
 	return 0;
@@ -187,13 +264,15 @@ void convolve(float x[], int N, float h[], int M, float y[], int P)
 		printf("Aborting convolution\n");
 		return;
 	}
-
+	cout << "clearing output buffer" << endl;
 	/*  Clear the output buffer y[] to all zero values  */
 	for (n = 0; n < P; n++)
 		y[n] = 0.0;
 
+	cout << "doing convolution" << endl;
 	/*  Do the convolution  */
 	/*  Outer loop:  process each input value x[n] in turn  */
+	int num = 0;
 	for (n = 0; n < N; n++) {
 		/*  Inner loop:  process x[n] with each sample of h[]  */
 		for (m = 0; m < M; m++)
