@@ -249,36 +249,34 @@ int main(int argc, char ** argv)
 	while (nextPow2 < (inputHead.subchunk2_size / 2) || nextPow2 < (irHead.subchunk2_size / 2)) {  // optimize this
 		nextPow2 *= 2;
 	}
-	// optimize all places with nextPow2 * 2
 	//optimize this with next one 
 	double * paddedInputArray = new double[nextPow2];
+	double * paddedIRArray = new double[nextPow2];
 	for (int i = 0; i < nextPow2; i++) {
 		if (i < (inputHead.subchunk2_size / 2))
 			paddedInputArray[i] = signals[0][i];
 		else
 			paddedInputArray[i] = 0.0;
-	}
-
-	double * paddedIRArray = new double[nextPow2];
-	for (int i = 0; i < nextPow2; i++) {
+		
 		if (i < (irHead.subchunk2_size / 2))
 			paddedIRArray[i] = signals[1][i];
 		else
 			paddedIRArray[i] = 0.0;
 	}
 
+	unsigned long int nextPow2x2 = nextPow2 * 2;
 	// optimize this with the next one
-	double * complexInputArray = new double[nextPow2 * 2];
+	double * complexInputArray = new double[nextPow2x2];
 	unsigned long int c = 0;
-	for (unsigned long i = 0; i < nextPow2 * 2; i += 2) {
+	for (unsigned long i = 0; i < nextPow2x2; i += 2) {
 		complexInputArray[i] = paddedInputArray[c];
 		complexInputArray[i + 1] = 0.0;
 		c++;
 	}
 
-	double * complexIRArray = new double[nextPow2 * 2];
+	double * complexIRArray = new double[nextPow2x2];
 	c = 0;
-	for (unsigned long i = 0; i < nextPow2 * 2; i += 2) {
+	for (unsigned long i = 0; i < nextPow2x2; i += 2) {
 		complexIRArray[i] = paddedIRArray[c];
 		complexIRArray[i + 1] = 0.0;
 		c++;
@@ -287,8 +285,8 @@ int main(int argc, char ** argv)
 	four1(complexInputArray - 1, nextPow2, 1);
 	four1(complexIRArray - 1, nextPow2, 1);
 
-	double * complexOutArray = new double[nextPow2 * 2];
-	for (int i = 0; i < (nextPow2 * 2) - 2; i += 2) {
+	double * complexOutArray = new double[nextPow2x2];
+	for (int i = 0; i < (nextPow2x2) - 2; i += 2) {
 		complexOutArray[i] = (complexInputArray[i] * complexIRArray[i]) - (complexInputArray[i + 1] * complexIRArray[i + 1]);
 		complexOutArray[i + 1] = (complexInputArray[i] * complexIRArray[i + 1]) + (complexInputArray[i + 1] * complexIRArray[i]);
 	}
@@ -297,7 +295,7 @@ int main(int argc, char ** argv)
 
 	double max = 0.0;
 	double doubNextPow2 = (double)nextPow2;
-	for (unsigned long int i = 0; i < nextPow2 * 2; i++) {
+	for (unsigned long int i = 0; i < nextPow2x2; i++) {
 		complexOutArray[i] = complexOutArray[i] / doubNextPow2;
 		if (fabs(complexOutArray[i]) > max) {
 			max = fabs(complexOutArray[i]);
