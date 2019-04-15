@@ -251,32 +251,37 @@ int main(int argc, char ** argv)
 	while (nextPow2 < biggest) {  // optimize this
 		nextPow2 <<= 1;
 	}
+
+
+	double * paddedInputArray = new double[nextPow2];
+	double * paddedIRArray = new double[nextPow2];
+	unsigned long int tmp = (inputHead.subchunk2_size / 2);
+	for (int i = 0; i < tmp; i++) {
+		paddedInputArray[i] = signals[0][i];
+	}
+	for (int i = tmp; i < nextPow2; i++) {
+		paddedInputArray[i] = 0.0;
+	}
+	tmp = (irHead.subchunk2_size / 2);
+	for (int i = 0; i < tmp; i++) {
+		paddedIRArray[i] = signals[1][i];
+	}
+	for (int i = tmp; i < nextPow2; i++) {
+		paddedIRArray[i] = 0.0;
+	}
+
 	unsigned long int nextPow2x2 = nextPow2 * 2;
+	// optimize this with the next one
 	double * complexInputArray = new double[nextPow2x2];
 	double * complexIRArray = new double[nextPow2x2];
 	unsigned long int c = 0;
-	for (int i = 0; i < nextPow2x2; i += 2) {
-		if (i < (inputHead.subchunk2_size / 2)) {
-			complexInputArray[i] = signals[0][c];
-			complexInputArray[i + 1] = 0.0; 
-		}
-		else {
-			complexInputArray[i] = 0.0;
-			complexInputArray[i + 1] = 0.0;
-		}
-		
-		if (i < (irHead.subchunk2_size / 2)) {
-			complexIRArray[i] = signals[1][c];
-			complexIRArray[i + 1] = 0.0;
-		}
-		else {
-			complexIRArray[i] = 0.0;
-			complexIRArray[i + 1] = 0.0;
-		}
-
+	for (unsigned long i = 0; i < nextPow2x2; i += 2) {
+		complexInputArray[i] = paddedInputArray[c];
+		complexInputArray[i + 1] = 0.0;
+		complexIRArray[i] = paddedIRArray[c];
+		complexIRArray[i + 1] = 0.0;
 		c++;
 	}
-
 
 	four1(complexInputArray - 1, nextPow2, 1);
 	four1(complexIRArray - 1, nextPow2, 1);
