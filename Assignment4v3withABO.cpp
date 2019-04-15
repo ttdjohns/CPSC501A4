@@ -230,57 +230,53 @@ int main(int argc, char ** argv)
 		printf("Usage: ./Assignment4 [input file] [IR file] [output file]\n");
 		return 0;
 	}
-	cout << "Begin" << endl;
+
 	signals = new double*[3];
 
 	clock_t currentTime;
 	currentTime = clock();
 
-	printf("attempting to read %s\n", argv[1]);
 	signals[0] = readFile(argv[1], inputHead);
 
-	printf("attempting to read %s\n", argv[2]);
 	signals[1] = readFile(argv[2], irHead);
 
-	//creating output array
-	cout << "Initilizing output arrays" << endl;
 
 	unsigned long int nextPow2 = 1;
-	while (nextPow2 < (inputHead.subchunk2_size / 2) || nextPow2 < (irHead.subchunk2_size / 2)) {  // optimize this
-		nextPow2 *= 2;
-	}
-	//optimize this with next one 
-	double * paddedInputArray = new double[nextPow2];
-	double * paddedIRArray = new double[nextPow2];
-	for (int i = 0; i < nextPow2; i++) {
-		if (i < (inputHead.subchunk2_size / 2))
-			paddedInputArray[i] = signals[0][i];
-		else
-			paddedInputArray[i] = 0.0;
-		
-		if (i < (irHead.subchunk2_size / 2))
-			paddedIRArray[i] = signals[1][i];
-		else
-			paddedIRArray[i] = 0.0;
-	}
+	unsigned long biggest;
+	if (inputHead.subchunk2_size > irHead.subchunk2_size)
+		biggest = inputHead.subchunk2_size / 2;
+	else
+		biggest = irHead.subchunk2_size / 2;
 
+	while (nextPow2 < biggest) {  // optimize this
+		nextPow2 <<= 1;
+	}
 	unsigned long int nextPow2x2 = nextPow2 * 2;
-	// optimize this with the next one
 	double * complexInputArray = new double[nextPow2x2];
+	double * complexIRArray = new double[nextPow2x2];
 	unsigned long int c = 0;
-	for (unsigned long i = 0; i < nextPow2x2; i += 2) {
-		complexInputArray[i] = paddedInputArray[c];
-		complexInputArray[i + 1] = 0.0;
+	for (int i = 0; i < nextPow2x2; i += 2) {
+		if (i < (inputHead.subchunk2_size / 2)) {
+			complexInputArray[i] = signals[0][c];
+			complexInputArray[i + 1] = 0.0; 
+		}
+		else {
+			complexInputArray[i] = 0.0;
+			complexInputArray[i + 1] = 0.0;
+		}
+		
+		if (i < (irHead.subchunk2_size / 2)) {
+			complexIRArray[i] = signals[1][c];
+			complexIRArray[i + 1] = 0.0;
+		}
+		else {
+			complexIRArray[i] = 0.0;
+			complexIRArray[i + 1] = 0.0;
+		}
+
 		c++;
 	}
 
-	double * complexIRArray = new double[nextPow2x2];
-	c = 0;
-	for (unsigned long i = 0; i < nextPow2x2; i += 2) {
-		complexIRArray[i] = paddedIRArray[c];
-		complexIRArray[i + 1] = 0.0;
-		c++;
-	}
 
 	four1(complexInputArray - 1, nextPow2, 1);
 	four1(complexIRArray - 1, nextPow2, 1);
