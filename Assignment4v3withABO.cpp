@@ -115,10 +115,14 @@ double * readFile(char *inputFile, header_file &headF) {
 
 		int nextFloat = 0;
 		for (int i = 40 + headF.subchunk1_size - 16 + 4; i < headF.subchunk2_size; i += 2) {
-			signal[nextFloat] = (((input[i]) | 0xff00) & ((input[i + 1] << 8) | 0x00ff)) / 32768.0;
+			short int num = (((input[i]) | 0xff00) & ((input[i + 1] << 8) | 0x00ff));
+			if (num > 0) 
+				signal[nextFloat] = num / 32767.0;
+			else 
+				signal[nextFloat] = num / 32768.0;
 			nextFloat++;
 		}
-		return &signal[0];
+		return &signal[1];
 	}
 	else {
 		cout << "failed to open file \n exiting..." << endl;
@@ -127,26 +131,20 @@ double * readFile(char *inputFile, header_file &headF) {
 	}
 }
 
-/******************************************************************************
-*		Author:		Leonard Manzara
-*
-*		
-*
-*
-******************************************************************************/
 
-
+//Author:		Leonard Manzara
 /* The four1 FFT from Numerical Recipes in C,
   nn must be a power of 2
   isign = +1 for an FFT, and -1 for the Inverse FFT.
   array size must be nn*2. 
   This code assumes the array starts
   at index 1, not 0, so subtract 1 when
-  calling the routine (see main() below).*/
+  calling the routine (see main() below).
+  */
 
 //From class handout
 
-void four1(double data[], unsigned long int nn, int isign)
+void four1(double data[], int nn, int isign)
 {
 
 	unsigned long n, mmax, m, j, istep, i;
@@ -168,6 +166,7 @@ void four1(double data[], unsigned long int nn, int isign)
 			m >>= 1;
 		}
 		j += m;
+
 	}
 	mmax = 2;
 	while (n > mmax) {
@@ -201,7 +200,7 @@ void outputToIntArray(double signal[], int *ret, unsigned long int s) {
 	}
 }
 
-void writeOutputToFile(int numberOfSamples, int out[], char *filename)
+void writeOutputToFile(unsigned long int numberOfSamples, int out[], char *filename)
 {
 	int i;
 
@@ -233,6 +232,9 @@ int main(int argc, char ** argv)
 	}
 	cout << "Begin" << endl;
 	signals = new double*[3];
+	
+	clock_t currentTime;
+	currentTime = clock();
 
 	printf("attempting to read %s\n", argv[1]);
 	signals[0] = readFile(argv[1], inputHead);
@@ -243,18 +245,13 @@ int main(int argc, char ** argv)
 	//creating output array
 	cout << "Initilizing output arrays" << endl;
 	unsigned long int outSize = (inputHead.subchunk2_size / 2) + (irHead.subchunk2_size / 2) - 1;
-	signals[2] = new double[outSize + 1];
-	cout << "finished initilizing output arrays" << endl;
-
-	//printf("begining convolution with inputHead.subchunk2_size = %lu, irHead.subchunk2_size = %lu, outSize = %lu\n", inputHead.subchunk2_size, irHead.subchunk2_size, outSize);
-	clock_t currentTime;
-	currentTime = clock();
 
 	unsigned long int nextPow2 = 1;
-	while (nextPow2 < (inputHead.subchunk2_size / 2) || nextPow2 < (irHead.subchunk2_size / 2)) {
+	while (nextPow2 < (inputHead.subchunk2_size / 2) || nextPow2 < (irHead.subchunk2_size / 2)) {  // optimize this
 		nextPow2 *= 2;
 	}
-
+	// optimize all places with nextPow2 * 2
+	//optimize this with next one 
 	double * paddedInputArray = new double[nextPow2];
 	for (int i = 0; i < nextPow2; i++) {
 		if (i < (inputHead.subchunk2_size / 2))
@@ -271,21 +268,25 @@ int main(int argc, char ** argv)
 			paddedIRArray[i] = 0.0;
 	}
 
+	// optimize this with the next one
 	double * complexInputArray = new double[nextPow2 * 2];
-	double * complexIRArray = new double[nextPow2 * 2];
-	for (unsigned long i = 0; i < nextPow2; i++) {
-		if ((i % 2) == 0) {
-			complexInputArray[i * 2] = paddedInputArray[i];
-			complexIRArray[i * 2] = paddedIRArray[i];
-		}
-		else{
-			complexInputArray[i * 2] = 0.0;
-			complexIRArray[i * 2] = 0.0;
-		}
+	unsigned long int c = 0;
+	for (unsigned long i = 0; i < nextPow2 * 2; i += 2) {
+		complexInputArray[i] = paddedInputArray[c];
+		complexInputArray[i + 1] = 0.0;
+		c++;
 	}
 
-	four1(complexInputArray, nextPow2, 1);
-	four1(complexIRArray, nextPow2, 1);
+	double * complexIRArray = new double[nextPow2 * 2];
+	c = 0;
+	for (unsigned long i = 0; i < nextPow2 * 2; i += 2) {
+		complexIRArray[i] = paddedIRArray[c];
+		complexIRArray[i + 1] = 0.0;
+		c++;
+	}
+
+	four1(complexInputArray - 1, nextPow2, 1);
+	four1(complexIRArray - 1, nextPow2, 1);
 
 	double * complexOutArray = new double[nextPow2 * 2];
 	for (int i = 0; i < (nextPow2 * 2) - 2; i += 2) {
@@ -293,15 +294,15 @@ int main(int argc, char ** argv)
 		complexOutArray[i + 1] = (complexInputArray[i] * complexIRArray[i + 1]) + (complexInputArray[i + 1] * complexIRArray[i]);
 	}
 
-	four1(complexOutArray, nextPow2, -1);
+	four1(complexOutArray - 1, nextPow2, -1);
 
 	double max = 0.0;
 	for (unsigned long int i = 0; i < nextPow2 * 2; i++) {
 		complexOutArray[i] = complexOutArray[i] / ((double)nextPow2);
 		if (fabs(complexOutArray[i]) > max) {
 			max = fabs(complexOutArray[i]);
-		}
-	}
+		}//*/
+	}//*/
 
 	for (unsigned long int i = 0; i < nextPow2; i++) {
 		complexOutArray[i] = complexOutArray[2 * i] / max;   // only the normalized real part 
@@ -315,7 +316,7 @@ int main(int argc, char ** argv)
 	int *buffer = new int[outSize];
 	outputToIntArray(complexOutArray, buffer, outSize);
 
-	writeOutputToFile((int)outSize, buffer, argv[3]);
+	writeOutputToFile(outSize, buffer, argv[3]);
 
 	printf("finished\n");
 	return 0;
