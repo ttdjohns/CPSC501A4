@@ -36,9 +36,9 @@ using namespace std;
 #define MONOPHONIC        1
 #define STEREOPHONIC      2
 
+#define SWAP(a,b) tempr=(a);(a)=(b);(b)=tempr
+
 //function prototypes
-void convolve(float* x, unsigned long int N, float* h, unsigned long int M, float y[], unsigned long int P);
-//void print_vector(char *title, float x[], int N);
 void writeWaveFileHeader(int channels, int numberSamples,
 	double outputRate, FILE *outputFile);
 size_t fwriteIntLSB(int data, FILE *stream);
@@ -61,16 +61,16 @@ struct header_file
 	unsigned long int subchunk2_size;			// subchunk2_size denotes the number of samples.
 } inputHead, irHead;
 
-float *input_signal;
+double *input_signal;
 unsigned long input_size = 0;
-float *ir_signal;
+double *ir_signal;
 unsigned long ir_size = 0;
 struct header_file headers[3];
 unsigned long* size;
-float ** signals;
+double ** signals;
 int nextInd = 0;
 
-float * readFile(char *inputFile, header_file &headF) {
+double * readFile(char *inputFile, header_file &headF) {
 	cout << "Entered readFile" << endl;
 	ifstream file(inputFile, ios::in | ios::binary | ios::ate);
 
@@ -109,7 +109,7 @@ float * readFile(char *inputFile, header_file &headF) {
 								(headF.subchunk2_size << 24);//*/
 
 
-		float * signal = new float[headF.subchunk2_size / 2];
+		double * signal = new double[headF.subchunk2_size / 2];
 
 		cout << "data size :" << (headF.subchunk2_size) << endl;
 
@@ -127,9 +127,77 @@ float * readFile(char *inputFile, header_file &headF) {
 	}
 }
 
-void outputToIntArray(int *ret, unsigned long int s) {
+/******************************************************************************
+*		Author:		Leonard Manzara
+*
+*		
+*
+*
+******************************************************************************/
+
+
+/* The four1 FFT from Numerical Recipes in C,
+  nn must be a power of 2
+  isign = +1 for an FFT, and -1 for the Inverse FFT.
+  array size must be nn*2. 
+  This code assumes the array starts
+  at index 1, not 0, so subtract 1 when
+  calling the routine (see main() below).*/
+
+//From class handout
+
+void four1(double data[], unsigned long int nn, int isign)
+{
+
+	unsigned long n, mmax, m, j, istep, i;
+	double wtemp, wr, wpr, wpi, wi, theta;
+	double tempr, tempi;
+
+	n = nn << 1;
+	j = 1;
+
+	for (i = 1; i < n; i += 2) {
+		if (j > i) {
+			SWAP(data[j], data[i]);
+			SWAP(data[j + 1], data[i + 1]);
+		}
+		m = nn;
+
+		while (m >= 2 && j > m) {
+			j -= m;
+			m >>= 1;
+		}
+		j += m;
+	}
+	mmax = 2;
+	while (n > mmax) {
+		istep = mmax << 1;
+		theta = isign * (6.28318530717959 / mmax);
+		wtemp = sin(0.5 * theta);
+		wpr = -2.0 * wtemp * wtemp;
+		wpi = sin(theta);
+		wr = 1.0;
+		wi = 0.0;
+		for (m = 1; m < mmax; m += 2) {
+			for (i = m; i <= n; i += istep) {
+				j = i + mmax;
+				tempr = wr * data[j] - wi * data[j + 1];
+				tempi = wr * data[j + 1] + wi * data[j];
+				data[j] = data[i] - tempr;
+				data[j + 1] = data[i + 1] - tempi;
+				data[i] += tempr;
+				data[i + 1] += tempi;
+			}
+			wr = (wtemp = wr) * wpr - wi * wpi + wr;
+			wi = wi * wpr + wtemp * wpi + wi;
+		}
+		mmax = istep;
+	}
+}
+
+void outputToIntArray(double signal[], int *ret, unsigned long int s) {
 	for (int i = 0; i < s; i++) {
-		ret[i] = (int)(signals[2][i] * 32768);
+		ret[i] = (int)(signal[i] * 32768);
 	}
 }
 
@@ -164,7 +232,7 @@ int main(int argc, char ** argv)
 		return 0;
 	}
 	cout << "Begin" << endl;
-	signals = new float*[3];
+	signals = new double*[3];
 
 	printf("attempting to read %s\n", argv[1]);
 	signals[0] = readFile(argv[1], inputHead);
@@ -175,39 +243,77 @@ int main(int argc, char ** argv)
 	//creating output array
 	cout << "Initilizing output arrays" << endl;
 	unsigned long int outSize = (inputHead.subchunk2_size / 2) + (irHead.subchunk2_size / 2) - 1;
-	signals[2] = new float[outSize + 1];
+	signals[2] = new double[outSize + 1];
 	cout << "finished initilizing output arrays" << endl;
 
 	//printf("begining convolution with inputHead.subchunk2_size = %lu, irHead.subchunk2_size = %lu, outSize = %lu\n", inputHead.subchunk2_size, irHead.subchunk2_size, outSize);
 	clock_t currentTime;
 	currentTime = clock();
 
-	convolve(signals[0], (inputHead.subchunk2_size / 2), signals[1], (irHead.subchunk2_size / 2), signals[2], outSize);
+	unsigned long int nextPow2 = 1;
+	while (nextPow2 < (inputHead.subchunk2_size / 2) || nextPow2 < (irHead.subchunk2_size / 2)) {
+		nextPow2 *= 2;
+	}
+
+	double * paddedInputArray = new double[nextPow2];
+	for (int i = 0; i < nextPow2; i++) {
+		if (i < (inputHead.subchunk2_size / 2))
+			paddedInputArray[i] = signals[0][i];
+		else
+			paddedInputArray[i] = 0.0;
+	}
+
+	double * paddedIRArray = new double[nextPow2];
+	for (int i = 0; i < nextPow2; i++) {
+		if (i < (irHead.subchunk2_size / 2))
+			paddedIRArray[i] = signals[1][i];
+		else
+			paddedIRArray[i] = 0.0;
+	}
+
+	double * complexInputArray = new double[nextPow2 * 2];
+	double * complexIRArray = new double[nextPow2 * 2];
+	for (unsigned long i = 0; i < nextPow2; i++) {
+		if ((i % 2) == 0) {
+			complexInputArray[i * 2] = paddedInputArray[i];
+			complexIRArray[i * 2] = paddedIRArray[i];
+		}
+		else{
+			complexInputArray[i * 2] = 0.0;
+			complexIRArray[i * 2] = 0.0;
+		}
+	}
+
+	four1(complexInputArray, nextPow2, 1);
+	four1(complexIRArray, nextPow2, 1);
+
+	double * complexOutArray = new double[nextPow2 * 2];
+	for (int i = 0; i < (nextPow2 * 2) - 2; i += 2) {
+		complexOutArray[i] = (complexInputArray[i] * complexIRArray[i]) - (complexInputArray[i + 1] * complexIRArray[i + 1]);
+		complexOutArray[i + 1] = (complexInputArray[i] * complexIRArray[i + 1]) + (complexInputArray[i + 1] * complexIRArray[i]);
+	}
+
+	four1(complexOutArray, nextPow2, -1);
+
+	double max = 0.0;
+	for (unsigned long int i = 0; i < nextPow2 * 2; i++) {
+		complexOutArray[i] = complexOutArray[i] / ((double)nextPow2);
+		if (fabs(complexOutArray[i]) > max) {
+			max = fabs(complexOutArray[i]);
+		}
+	}
+
+	for (unsigned long int i = 0; i < nextPow2; i++) {
+		complexOutArray[i] = complexOutArray[2 * i] / max;   // only the normalized real part 
+	}
 
 	currentTime = clock() - currentTime;
-	printf("Clock cycles taken for convolution: %d\n", currentTime);
+	printf("Clock cycles taken for convolution: %u\n", currentTime);
 	printf("Seconds taken for convolution: %f\n", ((float)currentTime) / CLOCKS_PER_SEC);
 
-	/*
-	printf("finished the convolution\n");
-	short int *buffer = new short int[sizeof(struct header_file) / 2 + size[2]];
-	printf("initialized the ouput buffer\n");
-
-	//file = fopen(argv[1], "rb");
-	//fread(&buffer, sizeof(struct header_file), 1, file);
-	//fclose(file);
-	printf("changing the size of the header\n");
-	headers[0].subchunk2_size = htole32(size[2]);
-	memcpy(buffer, &headers[0], sizeof(struct header_file));
-
-	printf("converting the signal back into short ints\n");
-	for (unsigned long i = 0; i < size[2]; i++) {
-		buffer[sizeof(struct header_file) + i] = (short int)(signals[2][i] * 32768);
-	}
-	//memcpy(buffer + 40, &size[2], 4);
-	*/
+	
 	int *buffer = new int[outSize];
-	outputToIntArray(buffer, outSize);
+	outputToIntArray(complexOutArray, buffer, outSize);
 
 	writeOutputToFile((int)outSize, buffer, argv[3]);
 
@@ -218,151 +324,6 @@ int main(int argc, char ** argv)
 
 
 // The following was written by  Dr. Lenord Manzara
-
-
-/*****************************************************************************
-*
-*    Function:     convolve
-*
-*    Description:  Convolves two signals, producing an output signal.
-*                  The convolution is done in the time domain using the
-*                  "Input Side Algorithm" (see Smith, p. 112-115).
-*
-*    Parameters:   x[] is the signal to be convolved
-*                  N is the number of samples in the vector x[]
-*                  h[] is the impulse response, which is convolved with x[]
-*                  M is the number of samples in the vector h[]
-*                  y[] is the output signal, the result of the convolution
-*                  P is the number of samples in the vector y[].  P must
-*                       equal N + M - 1
-*
-*****************************************************************************/
-
-void convolve(float x[], unsigned long int N, float h[], unsigned long int M, float y[], unsigned long int P)
-{
-	unsigned long int n, m;
-
-	/*  Make sure the output buffer is the right size: P = N + M - 1  */
-	if (P != (N + M - 1)) {
-		printf("Output signal vector is the wrong size\n");
-		printf("It is %-d, but should be %-d\n", P, (N + M - 1));
-		printf("Aborting convolution\n");
-		return;
-	}
-	//cout << "clearing output buffer" << endl;
-	/*  Clear the output buffer y[] to all zero values  */
-	for (n = 0; n < P; n++)
-		y[n] = 0.0;
-
-	//cout << "doing convolution" << endl;
-	/*  Do the convolution  */
-	/*  Outer loop:  process each input value x[n] in turn  */
-	int num = 0;
-	for (n = 0; n < N; n++) {
-		/*if (num == 0) {
-			printf("working through n = %lu \n", n);
-		}
-		num = (num + 1) % 100000;//*/
-		/*  Inner loop:  process x[n] with each sample of h[]  */
-		for (m = 0; m < M; m++)
-			y[n + m] += x[n] * h[m];
-	}
-}
-
-
-
-/*****************************************************************************
-*
-*    Function:     print_vector
-*
-*    Description:  Prints the vector out to the screen
-*
-*    Parameters:   title is a string naming the vector
-*                  x[] is the vector to be printed out
-*                  N is the number of samples in the vector x[]
-*
-*****************************************************************************/
-
-void print_vector(char *title, float x[], int N)
-{
-	int i;
-
-	printf("\n%s\n", title);
-	printf("Vector size:  %-d\n", N);
-	printf("Sample Number \tSample Value\n");
-	for (i = 0; i < N; i++)
-		printf("%-d\t\t%f\n", i, x[i]);
-}
-/******************************************************************************
-*
-*       function:       createTestTone
-*
-*       purpose:        Calculates and writes out a sine test tone to file
-*
-*       arguments:      frequency:  frequency of the test tone in Hz
-*                       duration:  length of the test tone in seconds
-*                       numberOfChannels:  number of audio channels
-*                       filename:  name of the file to create
-*
-*       internal
-*       functions:      writeWaveFileHeader, fwriteShortLSB
-*
-*       library
-*       functions:      ceil, pow, fopen, fprintf, sin, rint, fclose
-*
-******************************************************************************/
-
-void createTestTone(double frequency, double duration,
-	int numberOfChannels, char *filename)
-{
-	int i;
-
-	/*  Calculate the number of sound samples to create,
-		rounding upwards if necessary  */
-	int numberOfSamples = (int)ceil(duration * SAMPLE_RATE);
-
-	/*  Calculate the maximum value of a sample  */
-	int maximumValue = (int)pow(2.0, (double)BITS_PER_SAMPLE - 1) - 1;
-
-	/*  Open a binary output file stream for writing */
-	FILE *outputFileStream = fopen(filename, "wb");
-	if (outputFileStream == NULL) {
-		fprintf(stderr, "File %s cannot be opened for writing\n", filename);
-		return;
-	}
-
-	/*  Write the WAVE file header  */
-	writeWaveFileHeader(numberOfChannels, numberOfSamples,
-		SAMPLE_RATE, outputFileStream);
-
-	/*  Create the sine tone and write it to file  */
-	/*  Since the frequency is fixed, the angular frequency
-		and increment can be precalculated  */
-	double angularFrequency = 2.0 * PI * frequency;
-	double increment = angularFrequency / SAMPLE_RATE;
-	for (i = 0; i < numberOfSamples; i++) {
-		/*  Calculate the sine wave in the range -1.0 to + 1.0  */
-		double value = sin(i * increment);
-
-		/*  Convert the value to a 16-bit integer, with the
-			range -maximumValue to + maximumValue.  The calculated
-			value is rounded to the nearest integer  */
-		short int sampleValue = rint(value * maximumValue);
-
-		/*  Write out the sample as a 16-bit (short) integer
-			in little-endian format  */
-		fwriteShortLSB(sampleValue, outputFileStream);
-
-		/*  If stereo output, duplicate the sample in the right channel  */
-		if (numberOfChannels == STEREOPHONIC)
-			fwriteShortLSB(sampleValue, outputFileStream);
-	}
-
-	/*  Close the output file stream  */
-	fclose(outputFileStream);
-}
-
-
 
 /******************************************************************************
 *
