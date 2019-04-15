@@ -116,9 +116,9 @@ double * readFile(char *inputFile, header_file &headF) {
 		int nextFloat = 0;
 		for (int i = 40 + headF.subchunk1_size - 16 + 4; i < headF.subchunk2_size; i += 2) {
 			short int num = (((input[i]) | 0xff00) & ((input[i + 1] << 8) | 0x00ff));
-			if (num > 0) 
+			if (num > 0)
 				signal[nextFloat] = num / 32767.0;
-			else 
+			else
 				signal[nextFloat] = num / 32768.0;
 			nextFloat++;
 		}
@@ -136,13 +136,13 @@ double * readFile(char *inputFile, header_file &headF) {
 /* The four1 FFT from Numerical Recipes in C,
   nn must be a power of 2
   isign = +1 for an FFT, and -1 for the Inverse FFT.
-  array size must be nn*2. 
+  array size must be nn*2.
   This code assumes the array starts
   at index 1, not 0, so subtract 1 when
   calling the routine (see main() below).
   */
 
-//From class handout
+  //From class handout
 
 void four1(double data[], int nn, int isign)
 {
@@ -224,45 +224,6 @@ void writeOutputToFile(unsigned long int numberOfSamples, int out[], char *filen
 	fclose(outputFileStream);
 }
 
-unsigned long int findPow2() {
-	unsigned long int nextPow2 = 1;
-	while (nextPow2 < (inputHead.subchunk2_size / 2) || nextPow2 < (irHead.subchunk2_size / 2)) {  // optimize this
-		nextPow2 *= 2;
-	}
-	return nextPow2;
-}
-
-void padArrays(unsigned long int nextPow2, double* paddedInputArray, double* paddedIRArray) {
-	for (int i = 0; i < nextPow2; i++) {
-		if (i < (inputHead.subchunk2_size / 2))
-			paddedInputArray[i] = signals[0][i];
-		else
-			paddedInputArray[i] = 0.0;
-	}
-	for (int i = 0; i < nextPow2; i++) {
-		if (i < (irHead.subchunk2_size / 2))
-			paddedIRArray[i] = signals[1][i];
-		else
-			paddedIRArray[i] = 0.0;
-	}
-}
-
-void prepareComplexArrays(unsigned long int nextPow2, double paddedInputArray[], double paddedIRArray[], double* complexInputArray, double* complexIRArray) {
-	unsigned long int c = 0;
-	for (unsigned long i = 0; i < nextPow2 * 2; i += 2) {
-		complexInputArray[i] = paddedInputArray[c];
-		complexInputArray[i + 1] = 0.0;
-		c++;
-	}
-
-	c = 0;
-	for (unsigned long i = 0; i < nextPow2 * 2; i += 2) {
-		complexIRArray[i] = paddedIRArray[c];
-		complexIRArray[i + 1] = 0.0;
-		c++;
-	}
-}
-
 int main(int argc, char ** argv)
 {
 	if (argc != 4) {
@@ -271,7 +232,7 @@ int main(int argc, char ** argv)
 	}
 	cout << "Begin" << endl;
 	signals = new double*[3];
-	
+
 	clock_t currentTime;
 	currentTime = clock();
 
@@ -281,18 +242,47 @@ int main(int argc, char ** argv)
 	printf("attempting to read %s\n", argv[2]);
 	signals[1] = readFile(argv[2], irHead);
 
-	unsigned long int nextPow2 = findPow2();
+	//creating output array
+	cout << "Initilizing output arrays" << endl;
 
+	unsigned long int nextPow2 = 1;
+	while (nextPow2 < (inputHead.subchunk2_size / 2) || nextPow2 < (irHead.subchunk2_size / 2)) {  // optimize this
+		nextPow2 *= 2;
+	}
 	// optimize all places with nextPow2 * 2
 	//optimize this with next one 
 	double * paddedInputArray = new double[nextPow2];
+	for (int i = 0; i < nextPow2; i++) {
+		if (i < (inputHead.subchunk2_size / 2))
+			paddedInputArray[i] = signals[0][i];
+		else
+			paddedInputArray[i] = 0.0;
+	}
+
 	double * paddedIRArray = new double[nextPow2];
-	padArrays(nextPow2, paddedInputArray, paddedIRArray);
-	
+	for (int i = 0; i < nextPow2; i++) {
+		if (i < (irHead.subchunk2_size / 2))
+			paddedIRArray[i] = signals[1][i];
+		else
+			paddedIRArray[i] = 0.0;
+	}
 
 	// optimize this with the next one
 	double * complexInputArray = new double[nextPow2 * 2];
+	unsigned long int c = 0;
+	for (unsigned long i = 0; i < nextPow2 * 2; i += 2) {
+		complexInputArray[i] = paddedInputArray[c];
+		complexInputArray[i + 1] = 0.0;
+		c++;
+	}
+
 	double * complexIRArray = new double[nextPow2 * 2];
+	c = 0;
+	for (unsigned long i = 0; i < nextPow2 * 2; i += 2) {
+		complexIRArray[i] = paddedIRArray[c];
+		complexIRArray[i + 1] = 0.0;
+		c++;
+	}
 
 	four1(complexInputArray - 1, nextPow2, 1);
 	four1(complexIRArray - 1, nextPow2, 1);
@@ -306,8 +296,9 @@ int main(int argc, char ** argv)
 	four1(complexOutArray - 1, nextPow2, -1);
 
 	double max = 0.0;
+	double doubNextPow2 = (double)nextPow2;
 	for (unsigned long int i = 0; i < nextPow2 * 2; i++) {
-		complexOutArray[i] = complexOutArray[i] / ((double)nextPow2);
+		complexOutArray[i] = complexOutArray[i] / doubNextPow2;
 		if (fabs(complexOutArray[i]) > max) {
 			max = fabs(complexOutArray[i]);
 		}//*/
