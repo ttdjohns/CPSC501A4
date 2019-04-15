@@ -224,6 +224,45 @@ void writeOutputToFile(unsigned long int numberOfSamples, int out[], char *filen
 	fclose(outputFileStream);
 }
 
+unsigned long int findPow2() {
+	unsigned long int nextPow2 = 1;
+	while (nextPow2 < (inputHead.subchunk2_size / 2) || nextPow2 < (irHead.subchunk2_size / 2)) {  // optimize this
+		nextPow2 *= 2;
+	}
+	return nextPow2;
+}
+
+void padArrays(unsigned long int nextPow2, double* paddedInputArray, double* paddedIRArray) {
+	for (int i = 0; i < nextPow2; i++) {
+		if (i < (inputHead.subchunk2_size / 2))
+			paddedInputArray[i] = signals[0][i];
+		else
+			paddedInputArray[i] = 0.0;
+	}
+	for (int i = 0; i < nextPow2; i++) {
+		if (i < (irHead.subchunk2_size / 2))
+			paddedIRArray[i] = signals[1][i];
+		else
+			paddedIRArray[i] = 0.0;
+	}
+}
+
+void prepareComplexArrays(unsigned long int nextPow2, double paddedInputArray[], double paddedIRArray[], double* complexInputArray, double* complexIRArray) {
+	unsigned long int c = 0;
+	for (unsigned long i = 0; i < nextPow2 * 2; i += 2) {
+		complexInputArray[i] = paddedInputArray[c];
+		complexInputArray[i + 1] = 0.0;
+		c++;
+	}
+
+	c = 0;
+	for (unsigned long i = 0; i < nextPow2 * 2; i += 2) {
+		complexIRArray[i] = paddedIRArray[c];
+		complexIRArray[i + 1] = 0.0;
+		c++;
+	}
+}
+
 int main(int argc, char ** argv)
 {
 	if (argc != 4) {
@@ -242,48 +281,18 @@ int main(int argc, char ** argv)
 	printf("attempting to read %s\n", argv[2]);
 	signals[1] = readFile(argv[2], irHead);
 
-	//creating output array
-	cout << "Initilizing output arrays" << endl;
-	unsigned long int outSize = (inputHead.subchunk2_size / 2) + (irHead.subchunk2_size / 2) - 1;
+	unsigned long int nextPow2 = findPow2();
 
-	unsigned long int nextPow2 = 1;
-	while (nextPow2 < (inputHead.subchunk2_size / 2) || nextPow2 < (irHead.subchunk2_size / 2)) {  // optimize this
-		nextPow2 *= 2;
-	}
 	// optimize all places with nextPow2 * 2
 	//optimize this with next one 
 	double * paddedInputArray = new double[nextPow2];
-	for (int i = 0; i < nextPow2; i++) {
-		if (i < (inputHead.subchunk2_size / 2))
-			paddedInputArray[i] = signals[0][i];
-		else
-			paddedInputArray[i] = 0.0;
-	}
-
 	double * paddedIRArray = new double[nextPow2];
-	for (int i = 0; i < nextPow2; i++) {
-		if (i < (irHead.subchunk2_size / 2))
-			paddedIRArray[i] = signals[1][i];
-		else
-			paddedIRArray[i] = 0.0;
-	}
+	padArrays(nextPow2, paddedInputArray, paddedIRArray);
+	
 
 	// optimize this with the next one
 	double * complexInputArray = new double[nextPow2 * 2];
-	unsigned long int c = 0;
-	for (unsigned long i = 0; i < nextPow2 * 2; i += 2) {
-		complexInputArray[i] = paddedInputArray[c];
-		complexInputArray[i + 1] = 0.0;
-		c++;
-	}
-
 	double * complexIRArray = new double[nextPow2 * 2];
-	c = 0;
-	for (unsigned long i = 0; i < nextPow2 * 2; i += 2) {
-		complexIRArray[i] = paddedIRArray[c];
-		complexIRArray[i + 1] = 0.0;
-		c++;
-	}
 
 	four1(complexInputArray - 1, nextPow2, 1);
 	four1(complexIRArray - 1, nextPow2, 1);
@@ -312,7 +321,7 @@ int main(int argc, char ** argv)
 	printf("Clock cycles taken for convolution: %u\n", currentTime);
 	printf("Seconds taken for convolution: %f\n", ((float)currentTime) / CLOCKS_PER_SEC);
 
-	
+	unsigned long int outSize = (inputHead.subchunk2_size / 2) + (irHead.subchunk2_size / 2) - 1;
 	int *buffer = new int[outSize];
 	outputToIntArray(complexOutArray, buffer, outSize);
 
